@@ -7,9 +7,13 @@ import pandas as pd
 import math
 import re
 import io
-import pdfplumber
+import os
 
-app = FastAPI(title="report explainer - report overview api", version="0.1.0")
+import pdfplumber
+from dotenv import load_dotenv
+from openai import OpenAI
+
+app = FastAPI(title="report explainer - report overview api", version="0.2.0")
 
 # CORS (optional – keep if you're calling from frontend)
 app.add_middleware(
@@ -30,41 +34,37 @@ MAX_BYTES = MAX_MB * 1024 * 1024
 BASE_DIR = Path(__file__).resolve().parent  # app/
 DATA_DIR = BASE_DIR / "data"               # app/data
 
-# Pick ONE file as your lipid reference source.
+# Lipid reference CSV (grounding)
 LIPID_REF_PATH = DATA_DIR / "rag_lipid_reference_CHOL_LDL_HDL_TG.csv"
-# If you're using the other file instead, change to:
-# LIPID_REF_PATH = DATA_DIR / "ReportExplainer_refineddataset.csv"
 
 lipid_df: pd.DataFrame | None = None
 lipid_load_error: str | None = None
 
 # -----------------------------
+# Env / OpenAI
+# -----------------------------
+# Loads backend/report-overview/.env when uvicorn is started from backend/report-overview
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
+
+openai_client: OpenAI | None = None
+if OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+
+# -----------------------------
 # Lipid Detection (MVP)
 # -----------------------------
 LIPID_PATTERNS = {
-    # Matches examples:
-    # "CHOL 5.22", "Total Cholesterol: 210", "Cholesterol - 210"
     "CHOL": r"\b(?:chol|cholesterol|total\s*cholesterol)\b\s*[:\-]?\s*(\d+(?:\.\d+)?)",
-
-    # Matches:
-    # "LDL 140", "LDL Cholesterol: 140"
     "LDL": r"\b(?:ldl|ldl\s*cholesterol)\b\s*[:\-]?\s*(\d+(?:\.\d+)?)",
-
-    # Matches:
-    # "HDL 45", "HDL Cholesterol: 45"
     "HDL": r"\b(?:hdl|hdl\s*cholesterol)\b\s*[:\-]?\s*(\d+(?:\.\d+)?)",
-
-    # Matches:
-    # "TG 180", "Triglycerides: 180", "Triglyceride - 180"
     "TG": r"\b(?:tg|triglycerides?|triglyceride)\b\s*[:\-]?\s*(\d+(?:\.\d+)?)",
 }
 
 
 def detect_lipids_from_text(text: str) -> dict:
-    """
-    Simple regex-based lipid detector (MVP).
-    Returns dict like: {"CHOL": 210.0, "LDL": 130.0}
-    """
     results: dict[str, float] = {}
     lowered = (text or "").lower()
 
@@ -72,7 +72,7 @@ def detect_lipids_from_text(text: str) -> dict:
         match = re.search(pattern, lowered)
         if match:
             try:
-                results[lipid] = float(match.group(1))  # <-- CHANGED to group(1)
+                results[lipid] = float(match.group(1))
             except Exception:
                 pass
 
@@ -82,11 +82,7 @@ def detect_lipids_from_text(text: str) -> dict:
 # -----------------------------
 # Helpers
 # -----------------------------
-def extract_text_from_pdf_bytes(pdf_bytes: bytes, max_pages: int = 3) -> str:
-    """
-    Extract text from the first `max_pages` pages of a PDF (MVP).
-    Keeps it limited so it’s fast and safe.
-    """
+def extract_text_from_pdf_bytes(pdf_bytes: bytes, max_pages: int = 10) -> str:
     text_parts: list[str] = []
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
         for page in pdf.pages[:max_pages]:
@@ -97,9 +93,6 @@ def extract_text_from_pdf_bytes(pdf_bytes: bytes, max_pages: int = 3) -> str:
 
 
 def to_json_safe(value):
-    """
-    Convert pandas/numpy NaN to None so JSON serialization doesn't crash.
-    """
     if value is None:
         return None
     try:
@@ -113,9 +106,6 @@ def to_json_safe(value):
 
 
 def df_to_json_safe_records(df: pd.DataFrame) -> list[dict]:
-    """
-    Convert dataframe records to JSON safe list[dict] (NaN -> None).
-    """
     records = df.to_dict(orient="records")
     cleaned = []
     for row in records:
@@ -124,9 +114,6 @@ def df_to_json_safe_records(df: pd.DataFrame) -> list[dict]:
 
 
 def load_lipid_reference():
-    """
-    Load lipid reference CSV once at startup.
-    """
     global lipid_df, lipid_load_error
     try:
         if not LIPID_REF_PATH.exists():
@@ -144,6 +131,127 @@ def load_lipid_reference():
         lipid_load_error = str(e)
 
 
+def get_grounding_rows_for_detected_lipids(detected: dict) -> list[dict]:
+    """
+    Pull the matching lipid rows from the reference CSV for grounding.
+    """
+    if lipid_df is None or not detected:
+        return []
+
+    # Expecting a "test_code" column in rag_lipid_reference_CHOL_LDL_HDL_TG.csv
+    if "test_code" not in lipid_df.columns:
+        return []
+
+    codes = set(detected.keys())
+    subset = lipid_df[lipid_df["test_code"].astype(str).str.upper().isin(codes)].copy()
+
+    # Keep only a few columns to reduce prompt size (MVP)
+    keep_cols = [
+        "test_code",
+        "test_name",
+        "unit",
+        "desirable_range",
+        "borderline_high_range",
+        "high_range",
+        "low_range",
+        "what_it_measures_plain",
+        "how_to_read_results_plain",
+        "if_high_may_mean_plain",
+        "if_low_may_mean_plain",
+        "safe_next_step_plain",
+    ]
+    keep_cols = [c for c in keep_cols if c in subset.columns]
+    subset = subset[keep_cols].head(10)
+
+    return df_to_json_safe_records(subset)
+
+
+def generate_ai_overview(
+    extracted_text: str,
+    detected_lipids: dict,
+    grounding_rows: list[dict],
+) -> dict:
+    """
+    Calls OpenAI to produce a short, simple overview grounded in the CSV rows.
+    Returns a dict so we can add extra metadata later.
+    """
+    if openai_client is None:
+        return {
+            "enabled": False,
+            "message": "OPENAI_API_KEY not set. AI overview disabled.",
+            "overview": None,
+            "model": OPENAI_MODEL,
+        }
+
+    # Keep prompt small & safe
+    text_snippet = (extracted_text or "")[:2500]
+
+    system_msg = (
+        "You are Report Explainer. You help users understand lipid panel results in simple language.\n"
+        "Rules:\n"
+        "- Use ONLY the provided grounding reference data and the extracted report text.\n"
+        "- If a detail is not present, say 'Not found in the report' or 'Not available in the reference'.\n"
+        "- Do not provide diagnosis. Provide educational explanation only.\n"
+        "- Keep it short and clear (5-8 bullet points max).\n"
+    )
+
+    user_msg = {
+        "detected_lipids": detected_lipids,
+        "reference_data": grounding_rows,
+        "extracted_report_text_snippet": text_snippet,
+        "task": (
+            "Write a simple overview of the lipid results. "
+            "If values exist, mention each test and explain what it means, desirable range, and a safe next step."
+        ),
+    }
+
+    # -----------------------------
+    # UPDATED: quota-safe handling
+    # -----------------------------
+    try:
+        resp = openai_client.responses.create(
+            model=OPENAI_MODEL,
+            input=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": str(user_msg)},
+            ],
+        )
+
+        overview_text = getattr(resp, "output_text", None) or "AI overview could not be generated."
+
+        return {
+            "enabled": True,
+            "message": "AI overview generated",
+            "overview": overview_text.strip(),
+            "model": OPENAI_MODEL,
+        }
+
+    except Exception as e:
+        err = str(e).lower()
+
+        if (
+            "insufficient_quota" in err
+            or "exceeded your current quota" in err
+            or "rate limit" in err
+            or "429" in err
+        ):
+            return {
+                "enabled": False,
+                "message": "AI disabled: OpenAI quota/billing not available for this key",
+                "overview": None,
+                "model": OPENAI_MODEL,
+                "error": "insufficient_quota",
+            }
+
+        return {
+            "enabled": False,
+            "message": "AI overview failed",
+            "overview": None,
+            "model": OPENAI_MODEL,
+            "error": str(e),
+        }
+
+
 @app.on_event("startup")
 def on_startup():
     load_lipid_reference()
@@ -159,7 +267,7 @@ def health():
 
 @app.post("/api/report-overview/upload")
 async def upload_report(file: UploadFile = File(...)):
-    # basic validations
+    # validations
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
@@ -171,14 +279,22 @@ async def upload_report(file: UploadFile = File(...)):
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="empty file")
 
-    # REAL extraction (MVP): first 3 pages only
+    # Extract text (first 3 pages)
     extracted_text = extract_text_from_pdf_bytes(content, max_pages=3)
-
-    # keep preview short for swagger readability
     text_preview = extracted_text[:1500] if extracted_text else ""
 
-    # detect lipids from extracted text
+    # Detect lipids
     detected_lipids = detect_lipids_from_text(extracted_text)
+
+    # Grounding from CSV
+    grounding_rows = get_grounding_rows_for_detected_lipids(detected_lipids)
+
+    # AI overview (Phase 2)
+    ai_overview = generate_ai_overview(
+        extracted_text=extracted_text,
+        detected_lipids=detected_lipids,
+        grounding_rows=grounding_rows,
+    )
 
     # free memory
     content = b""
@@ -188,7 +304,9 @@ async def upload_report(file: UploadFile = File(...)):
         "message": "pdf uploaded and text extracted",
         "text_preview": text_preview,
         "detected_lipids": detected_lipids,
-        "warnings": ["mvp: extraction only, rag + llm next"],
+        "grounding_rows": grounding_rows,
+        "ai_overview": ai_overview,
+        "warnings": ["mvp: educational only; not medical advice"],
     }
 
 
