@@ -1,0 +1,54 @@
+# ======================
+# python
+# ======================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+
+# virtual environments
+.venv/
+venv/
+env/
+
+# ======================
+# env files (important)
+# ======================
+.env
+.env.*
+!.env.example
+
+# ======================
+# logs
+# ======================
+*.log
+
+# ======================
+# mac / windows junk
+# ======================
+.DS_Store
+Thumbs.db
+
+# ======================
+# vscode
+# ======================
+.vscode/
+
+# ======================
+# node (if added later)
+# ======================
+node_modules/
+
+# ======================
+# build artifacts
+# ======================
+dist/
+build/
+
+# ======================
+# uploaded files (future)
+# ======================
+uploads/
+tmp/
