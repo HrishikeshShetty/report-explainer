@@ -279,8 +279,8 @@ async def upload_report(file: UploadFile = File(...)):
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="empty file")
 
-    # Extract text (first 3 pages)
-    extracted_text = extract_text_from_pdf_bytes(content, max_pages=3)
+    # Extract text (first 10 pages)
+    extracted_text = extract_text_from_pdf_bytes(content, max_pages=10)
     text_preview = extracted_text[:1500] if extracted_text else ""
 
     # Detect lipids
