@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+import fitz  # pymupdf
 
 app = FastAPI(title="report explainer - report overview api", version="0.1.0")
 
@@ -17,6 +18,14 @@ def is_pdf(file: UploadFile) -> bool:
     return name_ok or mime_ok
 
 
+def extract_pdf_text(pdf_bytes: bytes) -> str:
+    text_parts: list[str] = []
+    with fitz.open(stream=pdf_bytes, filetype="pdf") as doc:
+        for page in doc:
+            text_parts.append(page.get_text("text"))
+    return "\n".join(text_parts).strip()
+
+
 @app.post("/api/report-overview/upload")
 async def upload_report(file: UploadFile = File(...)):
     # validate pdf
@@ -32,12 +41,16 @@ async def upload_report(file: UploadFile = File(...)):
     if len(content) == 0:
         raise HTTPException(status_code=400, detail="empty file")
 
-    # delete report variable (lower memory)
+    extracted_text = extract_pdf_text(content)
+    if not extracted_text:
+        raise HTTPException(status_code=400, detail="could not extract text from pdf")
+
+    # delete report variable
     content = b""
 
     return {
         "is_valid_report": True,
-        "message": "upload validated. next step: pdf parsing + rag + openai",
-        "tests_detected": ["CHOL", "LDL", "HDL", "TG"],
-        "warnings": ["mvp stub response"]
+        "message": "pdf uploaded and text extracted",
+        "text_preview": extracted_text[:500],
+        "warnings": ["mvp: extraction only, rag + openai next"],
     }
