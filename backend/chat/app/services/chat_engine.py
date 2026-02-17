@@ -1,27 +1,83 @@
 import os
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
+class ChatEngine:
+    def __init__(self):
+        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.mode = os.getenv("CHAT_MODE", "hybrid")
 
-def deterministic_answer(question: str, lipids: dict) -> str:
-    if "ldl" in question.lower():
-        ldl = lipids.get("LDL")
-        if ldl:
-            if ldl < 100:
-                return "Your LDL is in the optimal range."
-            elif ldl < 160:
-                return "Your LDL is borderline high."
-            else:
-                return "Your LDL is high. Consider consulting a doctor."
-    return "Ask about a specific lipid value like LDL, HDL, or TG."
+        # downgrade automatically if no key
+        if not self.api_key:
+            self.mode = "deterministic"
 
+    def answer(self, question: str, lipids: dict):
+        if self.mode == "deterministic":
+            return self.rule_based_answer(question, lipids)
 
-def generate_chat_response(question: str, lipids: dict) -> str:
-    if not OPENAI_API_KEY:
-        return deterministic_answer(question, lipids)
+        # Future: AI mode
+        return self.rule_based_answer(question, lipids)
 
-    try:
-        # future OpenAI integration
-        return deterministic_answer(question, lipids)
-    except Exception:
-        return deterministic_answer(question, lipids)
+    # ---------- RULE ENGINE ----------
+    def rule_based_answer(self, question: str, lipids: dict):
+        q = question.lower()
+
+        if "ldl" in q:
+            return self.ldl_logic(lipids.get("LDL"))
+
+        if "hdl" in q:
+            return self.hdl_logic(lipids.get("HDL"))
+
+        if "triglyceride" in q or "tg" in q:
+            return self.tg_logic(lipids.get("TG"))
+
+        if "cholesterol" in q or "chol" in q:
+            return self.chol_logic(lipids.get("CHOL"))
+
+        return "Ask about LDL, HDL, triglycerides (TG), or total cholesterol."
+
+    # ---------- INDIVIDUAL RULES ----------
+    def ldl_logic(self, value):
+        if value is None:
+            return "LDL value not available."
+
+        if value < 100:
+            return "Your LDL is optimal."
+        elif value < 130:
+            return "Your LDL is near optimal."
+        elif value < 160:
+            return "Your LDL is borderline high."
+        else:
+            return "Your LDL is high."
+
+    def hdl_logic(self, value):
+        if value is None:
+            return "HDL value not available."
+
+        if value >= 60:
+            return "Your HDL is protective (good)."
+        elif value >= 40:
+            return "Your HDL is acceptable."
+        else:
+            return "Your HDL is low."
+
+    def tg_logic(self, value):
+        if value is None:
+            return "Triglyceride value not available."
+
+        if value < 150:
+            return "Your triglycerides are normal."
+        elif value < 200:
+            return "Your triglycerides are borderline high."
+        else:
+            return "Your triglycerides are high."
+
+    def chol_logic(self, value):
+        if value is None:
+            return "Total cholesterol value not available."
+
+        if value < 200:
+            return "Your total cholesterol is desirable."
+        elif value < 240:
+            return "Your total cholesterol is borderline high."
+        else:
+            return "Your total cholesterol is high."
