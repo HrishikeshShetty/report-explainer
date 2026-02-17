@@ -1,5 +1,5 @@
 # ======================
-# python
+# Python / Backend
 # ======================
 __pycache__/
 *.py[cod]
@@ -7,6 +7,7 @@ __pycache__/
 *.pyd
 *.so
 *.egg-info/
+*.sqlite3
 
 # virtual environments
 .venv/
@@ -37,18 +38,22 @@ Thumbs.db
 .vscode/
 
 # ======================
-# node (if added later)
+# node / frontend
 # ======================
 node_modules/
-
-# ======================
-# build artifacts
-# ======================
 dist/
 build/
+.next/
+coverage/
 
 # ======================
-# uploaded files (future)
+# uploaded files (optional)
 # ======================
 uploads/
 tmp/
+
+# ======================
+# archives (optional)
+# ======================
+*.zip
+*.tar.gz
