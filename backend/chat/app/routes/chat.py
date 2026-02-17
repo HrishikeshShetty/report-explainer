@@ -1,28 +1,36 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+from typing import Optional, Dict
+
 from app.services.chat_engine import ChatEngine
-import math
+from app.state import create_report_session, get_report_lipids
 
 router = APIRouter()
 engine = ChatEngine()
 
+
 class ChatRequest(BaseModel):
     question: str
-    lipids: dict
-
-
-# ---- FIX: JSON safe converter ----
-def make_json_safe(obj):
-    if isinstance(obj, float) and (math.isnan(obj) or math.isinf(obj)):
-        return None
-    if isinstance(obj, dict):
-        return {k: make_json_safe(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [make_json_safe(v) for v in obj]
-    return obj
+    lipids: Optional[Dict[str, float]] = None
+    report_id: Optional[str] = None
 
 
 @router.post("/ask")
 def ask_question(payload: ChatRequest):
-    result = engine.answer(payload.question, payload.lipids)
-    return make_json_safe(result)
+    # Case 1: New session (lipids provided)
+    if payload.lipids:
+        report_id = create_report_session(payload.lipids)
+        result = engine.answer(payload.question, payload.lipids)
+        result["report_id"] = report_id
+        return result
+
+    # Case 2: Existing session
+    if payload.report_id:
+        lipids = get_report_lipids(payload.report_id)
+        if not lipids:
+            raise HTTPException(status_code=404, detail="Invalid report_id")
+        result = engine.answer(payload.question, lipids)
+        result["report_id"] = payload.report_id
+        return result
+
+    raise HTTPException(status_code=400, detail="Provide lipids or report_id")

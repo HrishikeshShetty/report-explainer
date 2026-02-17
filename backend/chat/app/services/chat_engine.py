@@ -131,6 +131,12 @@ class ChatEngine:
         except FileNotFoundError:
             self.df = None
 
+    def _mode_note(self) -> Optional[str]:
+        # clear, explicit behavior (so your repo is "ready" without keys)
+        if self.mode == "deterministic":
+            return "OPENAI_API_KEY not set, running in deterministic mode."
+        return None
+
     def answer(self, question: str, lipids: dict) -> Dict[str, Any]:
         # deterministic now (AI integration later)
         return self.grounded_answer(question, lipids)
@@ -154,7 +160,8 @@ class ChatEngine:
                 "details": [],
                 "highlights": [],
                 "sources": [],
-                "mode": "deterministic",
+                "mode": "deterministic" if self.mode == "deterministic" else "hybrid",
+                "note": self._mode_note(),
             }
 
         # focus one lipid if asked, else summarize all provided
@@ -172,13 +179,17 @@ class ChatEngine:
                 row = _get_row(self.df, code)
 
             unit = _safe_text(row, "unit") or "mg/dL"
-            ranges = _build_ranges(row) if row else {
-                "desirable_range": None,
-                "borderline_high_range": None,
-                "high_range": None,
-                "low_range": None,
-                "sex_specific_ranges": None,
-            }
+            ranges = (
+                _build_ranges(row)
+                if row
+                else {
+                    "desirable_range": None,
+                    "borderline_high_range": None,
+                    "high_range": None,
+                    "low_range": None,
+                    "sex_specific_ranges": None,
+                }
+            )
 
             category = self._category(code, value)
 
@@ -238,6 +249,7 @@ class ChatEngine:
             "highlights": highlights,
             "sources": sources,
             "mode": "deterministic" if self.mode == "deterministic" else "hybrid",
+            "note": self._mode_note(),
         }
 
     # ---------- Deterministic categorization ----------
