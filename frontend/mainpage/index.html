@@ -4,20 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Report-Explainer</title>
-  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Use ./ to avoid path issues in Live Server -->
+  <link rel="stylesheet" href="./styles.css" />
 </head>
+
 <body>
+  <!-- Background (CSS will make this the nice gradient) -->
+  <div class="bg"></div>
+
   <main class="container">
     <header class="header">
       <h1>Report Explainer</h1>
-      <p class="subtitle">upload a blood test pdf and get a simple explanation.</p>
+      <p class="subtitle">Upload a blood test PDF and get a simple explanation.</p>
     </header>
 
     <section class="card">
-      <h2>upload report</h2>
+      <h2>Upload report</h2>
 
       <form id="uploadForm" class="form">
-        <label class="label" for="pdfFile">pdf file</label>
+        <label class="label" for="pdfFile">PDF file</label>
 
         <input
           id="pdfFile"
@@ -28,28 +34,104 @@
           required
         />
 
-        <p class="hint">pdf only • max 20mb</p>
+        <p class="hint">PDF only • max 20MB</p>
 
         <div id="errorBox" class="error" role="alert" aria-live="polite"></div>
 
         <button id="submitBtn" type="submit" class="btn" disabled>
-          continue
+          Continue
         </button>
       </form>
+
+      <!-- Upload status -->
+      <div id="uploadStatus" class="status" aria-live="polite"></div>
+
+      <!-- Extracted lipids panel (hidden until upload succeeds) -->
+      <div id="resultsSection" class="results hidden">
+        <div class="divider"></div>
+
+        <div class="section-head">
+          <h2>Extracted lipids</h2>
+          <div class="badge-row">
+            <span id="reportIdBadge" class="badge hidden"></span>
+            <span id="extractionBadge" class="badge hidden"></span>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table" aria-label="Extracted lipid values">
+            <thead>
+              <tr>
+                <th>Test</th>
+                <th>Value</th>
+                <th>Unit</th>
+                <th>Range</th>
+              </tr>
+            </thead>
+            <tbody id="lipidsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Chat panel (hidden until we have lipids/report_id) -->
+      <div id="chatSection" class="chat hidden">
+        <div class="divider"></div>
+
+        <h2>Ask a question</h2>
+
+        <div id="chatErrorBox" class="error" role="alert" aria-live="polite"></div>
+
+        <div class="chat-controls">
+          <textarea
+            id="questionInput"
+            class="textarea"
+            rows="3"
+            placeholder="e.g., what does high LDL mean?"
+          ></textarea>
+
+          <div class="chat-actions">
+            <button id="askBtn" class="btn" type="button">Ask</button>
+          </div>
+        </div>
+
+        <div id="chatLoading" class="loading hidden">Thinking…</div>
+
+        <div id="chatResponse" class="response hidden">
+          <div class="meta">
+            <span id="modePill" class="pill hidden"></span>
+            <span id="noteText" class="note hidden"></span>
+          </div>
+
+          <p id="answerText" class="answer"></p>
+
+          <ul id="highlightsList" class="list hidden"></ul>
+
+          <details id="sourcesDetails" class="sources hidden">
+            <summary>Sources</summary>
+            <ul id="sourcesList" class="list"></ul>
+          </details>
+        </div>
+
+        <div id="chatHistory" class="history hidden">
+          <h3>History</h3>
+          <div id="historyItems"></div>
+        </div>
+      </div>
 
       <div class="divider"></div>
 
       <p class="disclaimer">
-        this tool explains your report in simple language. it does not provide diagnosis or treatment.
-        for medical decisions, consult a qualified professional.
+        This tool explains your report in simple language. It does not provide diagnosis or treatment.
+        For medical decisions, consult a qualified professional.
       </p>
     </section>
 
     <footer class="footer">
-      <span>mvp • chol / ldl / hdl / tg</span>
+      <span>MVP • CHOL / LDL / HDL / TG</span>
     </footer>
   </main>
 
-  <script src="app.js"></script>
+  <!-- Use ./ to avoid path issues in Live Server -->
+  <script src="./app.js"></script>
 </body>
 </html>
