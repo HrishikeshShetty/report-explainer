@@ -5,12 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Report-Explainer</title>
 
-  <!-- Use ./ to avoid path issues in Live Server -->
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=2" />
 </head>
 
 <body>
-  <!-- Background (CSS will make this the nice gradient) -->
   <div class="bg"></div>
 
   <main class="container">
@@ -22,7 +20,7 @@
     <section class="card">
       <h2>Upload report</h2>
 
-      <form id="uploadForm" class="form">
+      <form id="uploadForm" class="form" onsubmit="return false;">
         <label class="label" for="pdfFile">PDF file</label>
 
         <input
@@ -38,15 +36,14 @@
 
         <div id="errorBox" class="error" role="alert" aria-live="polite"></div>
 
-        <button id="submitBtn" type="submit" class="btn" disabled>
-          Continue
+        <button id="submitBtn" type="button" class="btn" disabled>
+          continue
         </button>
       </form>
 
-      <!-- Upload status -->
       <div id="uploadStatus" class="status" aria-live="polite"></div>
 
-      <!-- Extracted lipids panel (hidden until upload succeeds) -->
+      <!-- RESULTS -->
       <div id="resultsSection" class="results hidden">
         <div class="divider"></div>
 
@@ -59,7 +56,7 @@
         </div>
 
         <div class="table-wrap">
-          <table class="table" aria-label="Extracted lipid values">
+          <table class="table">
             <thead>
               <tr>
                 <th>Test</th>
@@ -73,13 +70,13 @@
         </div>
       </div>
 
-      <!-- Chat panel (hidden until we have lipids/report_id) -->
+      <!-- CHAT -->
       <div id="chatSection" class="chat hidden">
         <div class="divider"></div>
 
         <h2>Ask a question</h2>
 
-        <div id="chatErrorBox" class="error" role="alert" aria-live="polite"></div>
+        <div id="chatErrorBox" class="error"></div>
 
         <div class="chat-controls">
           <textarea
@@ -96,6 +93,7 @@
 
         <div id="chatLoading" class="loading hidden">Thinking…</div>
 
+        <!-- RESPONSE -->
         <div id="chatResponse" class="response hidden">
           <div class="meta">
             <span id="modePill" class="pill hidden"></span>
@@ -112,8 +110,11 @@
           </details>
         </div>
 
+        <!-- HISTORY (UPDATED UX READY) -->
         <div id="chatHistory" class="history hidden">
           <h3>History</h3>
+
+          <!-- Scrollable container for history items -->
           <div id="historyItems"></div>
         </div>
       </div>
@@ -131,7 +132,7 @@
     </footer>
   </main>
 
-  <!-- Use ./ to avoid path issues in Live Server -->
-  <script src="./app.js"></script>
+  <!-- Cache-busting version prevents Live Server caching issues -->
+  <script src="./app.js?v=2"></script>
 </body>
 </html>

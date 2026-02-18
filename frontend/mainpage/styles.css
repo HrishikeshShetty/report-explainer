@@ -350,20 +350,102 @@ body{
   font-size: 13px;
 }
 
-/* history block */
+/* =========================
+   HISTORY (UX UPGRADE)
+   - fixed height scroll area
+   - collapsible items (details/summary)
+   ========================= */
+
 .history{
   margin-top: 14px;
+  max-height: 320px;     /* prevents endless page scrolling */
+  overflow-y: auto;      /* scroll inside history only */
+  padding-right: 6px;    /* space for scrollbar */
+}
+
+/* optional: make history items nicely spaced */
+#historyItems{
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .history h3{
   margin: 0 0 10px 0;
   font-size: 14px;
   color: var(--muted);
+  position: sticky;      /* keeps title visible while scrolling */
+  top: 0;
+  background: rgba(11,18,32,0.35);
+  backdrop-filter: blur(8px);
+  padding: 6px 0;
+  z-index: 1;
+}
+
+/* each history item */
+.history-item{
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+}
+
+/* hover feedback */
+.history-item:hover{
+  border-color: rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.05);
+}
+
+/* summary line (question) */
+.history-item summary{
+  cursor: pointer;
+  font-weight: 750;
+  color: rgba(255,255,255,0.92);
+  outline: none;
+  list-style: none;             /* removes default marker space */
+}
+
+/* remove default browser markers (Chrome/Edge) */
+.history-item summary::-webkit-details-marker{
+  display:none;
+}
+
+/* remove default marker (Firefox) */
+.history-item summary::marker{
+  content: "";
+}
+
+/* custom caret */
+.history-item summary::before{
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--muted);
+  transform: translateY(-1px);
+  transition: transform 120ms ease;
+}
+
+.history-item[open] summary::before{
+  transform: rotate(90deg) translateY(-1px);
+}
+
+/* answer block */
+.history-answer{
+  margin-top: 10px;
+  line-height: 1.6;
+  font-size: 13px;
+  color: rgba(255,255,255,0.88);
+}
+
+/* mode */
+.history-meta{
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted2);
 }
 
 /* small responsiveness */
 @media (max-width: 640px){
-  body{ padding: 18px 12px; }
-  .header h1{ font-size: 34px; }
-  .card{ padding: 14px; }
+  .history{ max-height: 260px; }
 }
+

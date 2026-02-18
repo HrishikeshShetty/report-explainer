@@ -9,6 +9,7 @@ const UPLOAD_URL = `${API_BASE}/api/report-overview/upload`;
 // chat backend (separate service)
 const CHAT_API_BASE = "http://127.0.0.1:8001"; // change to 8000 only if chat is served on same port
 const CHAT_URL = `${CHAT_API_BASE}/api/chat/ask`;
+const HISTORY_URL = `${CHAT_API_BASE}/api/chat/history`;
 
 // ---- DOM ----
 const fileInput = document.getElementById("pdfFile");
@@ -46,6 +47,7 @@ const historyItemsEl = document.getElementById("historyItems");
 let currentLipids = null;   // { CHOL, LDL, HDL, TG }
 let currentReportId = null; // uuid (optional)
 const chatHistory = [];     // [{q,a,mode}]
+let historyLoadedOnce = false;
 
 // ---- utilities ----
 function escapeHtml(str) {
@@ -206,13 +208,9 @@ function renderResults(payload) {
   const detected = payload?.detected_lipids || {};
   const groundingRows = payload?.grounding_rows || [];
 
-  // store state
   currentLipids = normalizeLipidsFromDetected(detected);
-
-  // report-overview may or may not return report_id
   currentReportId = payload?.report_id || payload?.reportId || null;
 
-  // badges
   if (reportIdBadgeEl) {
     if (currentReportId) {
       reportIdBadgeEl.textContent = `report_id: ${currentReportId}`;
@@ -231,22 +229,17 @@ function renderResults(payload) {
   renderLipidsTable(currentLipids, groundingRows);
   showResultsSection(true);
 
-  // enable chat if we have lipids or report id
   const canChat = !!currentReportId || hasLipids();
   showChatSection(canChat);
 
   setUploadStatus("upload complete ✅");
-
-  // now that we have state, update Ask button
   updateAskButtonState();
 
-  // smooth scroll to results (nice UX)
   scrollToEl(resultsSectionEl || chatSectionEl);
 }
 
 // ---- chat rendering ----
 function renderChatResponse(data) {
-  // mode pill
   if (modePillEl) {
     if (data?.mode) {
       modePillEl.textContent = data.mode;
@@ -256,7 +249,6 @@ function renderChatResponse(data) {
     }
   }
 
-  // note
   if (noteTextEl) {
     if (data?.note) {
       noteTextEl.textContent = data.note;
@@ -266,12 +258,10 @@ function renderChatResponse(data) {
     }
   }
 
-  // answer
   if (answerTextEl) {
     answerTextEl.textContent = data?.answer || "No answer returned.";
   }
 
-  // highlights
   if (highlightsListEl) {
     const highlights = Array.isArray(data?.highlights) ? data.highlights : [];
     if (highlights.length) {
@@ -283,7 +273,6 @@ function renderChatResponse(data) {
     }
   }
 
-  // sources
   if (sourcesDetailsEl && sourcesListEl) {
     const sources = Array.isArray(data?.sources) ? data.sources : [];
     if (sources.length) {
@@ -299,6 +288,7 @@ function renderChatResponse(data) {
   scrollToEl(chatResponseEl);
 }
 
+// ---- UPDATED HISTORY RENDERING (newest on top + collapsible) ----
 function renderHistory() {
   if (!chatHistoryEl || !historyItemsEl) return;
 
@@ -309,24 +299,60 @@ function renderHistory() {
   }
 
   chatHistoryEl.classList.remove("hidden");
+  historyItemsEl.innerHTML = "";
 
-  historyItemsEl.innerHTML = chatHistory
-    .slice()
-    .reverse()
-    .map((item) => {
-      return `
-        <div style="margin-top:10px; padding:10px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; background: rgba(255,255,255,0.04);">
-          <div style="font-weight:800;">Q:</div>
-          <div style="color:var(--muted); margin-top:4px;">${escapeHtml(item.q)}</div>
-          <div style="font-weight:800; margin-top:8px;">A:</div>
-          <div style="margin-top:4px; line-height:1.7;">${escapeHtml(item.a)}</div>
-          ${item.mode ? `<div style="margin-top:8px; color:var(--muted); font-size:12px;">mode: ${escapeHtml(item.mode)}</div>` : ""}
-        </div>
-      `;
-    })
-    .join("");
+  const newestFirst = chatHistory.slice().reverse();
 
-  scrollToEl(chatHistoryEl);
+  newestFirst.forEach((item) => {
+    const details = document.createElement("details");
+    details.className = "history-item";
+
+    const summary = document.createElement("summary");
+    summary.textContent = item.q || "(no question)";
+    details.appendChild(summary);
+
+    const ans = document.createElement("div");
+    ans.className = "history-answer";
+    ans.innerHTML = `
+      <div><b>A:</b> ${escapeHtml(item.a || "")}</div>
+      ${item.mode ? `<div class="history-meta">mode: ${escapeHtml(item.mode)}</div>` : ""}
+    `;
+    details.appendChild(ans);
+
+    historyItemsEl.appendChild(details);
+  });
+}
+
+// ---- load history from backend (on refresh) ----
+async function loadHistoryFromBackend() {
+  if (historyLoadedOnce) return; // prevent double fetch
+  historyLoadedOnce = true;
+
+  try {
+    const res = await fetch(`${HISTORY_URL}?limit=20&user_id=default`);
+    if (!res.ok) return;
+
+    const data = await res.json();
+    const items = data?.items || [];
+    if (!items.length) return;
+
+    // reset local history to avoid duplicates
+    chatHistory.length = 0;
+
+    items.forEach((item) => {
+      chatHistory.push({
+        q: item.question,
+        a: item.answer,
+        mode: item.mode || "",
+      });
+    });
+
+    renderHistory();
+    showChatSection(true);
+    updateAskButtonState();
+  } catch (err) {
+    console.warn("History load failed", err);
+  }
 }
 
 // ---- events ----
@@ -337,14 +363,12 @@ if (fileInput) {
   });
 }
 
-// enable/disable Ask as user types
 if (questionInputEl) {
   questionInputEl.addEventListener("input", () => {
     setChatError("");
     updateAskButtonState();
   });
 
-  // Enter to send (Shift+Enter = newline)
   questionInputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -360,30 +384,27 @@ if (form) {
     const file = fileInput?.files?.[0];
     if (!validateFile(file)) return;
 
-    // reset UI bits
     setError("");
     setUploadStatus("uploading…");
     setLoading(true);
 
-    // reset state for clean re-upload
     currentLipids = null;
     currentReportId = null;
     showResultsSection(false);
     showChatSection(false);
     setChatError("");
     showChatResponse(false);
+
     if (reportIdBadgeEl) reportIdBadgeEl.classList.add("hidden");
     if (extractionBadgeEl) extractionBadgeEl.classList.add("hidden");
+
     updateAskButtonState();
 
     try {
       const fd = new FormData();
-      fd.append("file", file); // backend expects "file"
+      fd.append("file", file);
 
-      const res = await fetch(UPLOAD_URL, {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch(UPLOAD_URL, { method: "POST", body: fd });
 
       if (!res.ok) {
         let detail = "";
@@ -392,15 +413,10 @@ if (form) {
           detail = j?.detail ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)) : "";
         } catch (_) {}
 
-        if (res.status === 413) {
-          setError(detail || "file too large for server. upload a smaller pdf.");
-        } else if (res.status === 400) {
-          setError(detail || "bad request. please upload a valid pdf.");
-        } else if (res.status === 500) {
-          setError(detail || "server error. check backend logs.");
-        } else {
-          setError(detail || `upload failed. status: ${res.status}`);
-        }
+        if (res.status === 413) setError(detail || "file too large for server. upload a smaller pdf.");
+        else if (res.status === 400) setError(detail || "bad request. please upload a valid pdf.");
+        else if (res.status === 500) setError(detail || "server error. check backend logs.");
+        else setError(detail || `upload failed. status: ${res.status}`);
 
         setUploadStatus("");
         return;
@@ -409,7 +425,6 @@ if (form) {
       const data = await res.json();
       renderResults(data);
 
-      // If chat is now available, focus the question box
       if (!chatSectionEl?.classList.contains("hidden")) {
         questionInputEl?.focus();
       }
@@ -419,6 +434,13 @@ if (form) {
     } finally {
       setLoading(false);
     }
+  });
+}
+
+if (submitBtn) {
+  submitBtn.addEventListener("click", () => {
+    const evt = new Event("submit", { cancelable: true });
+    form?.dispatchEvent(evt);
   });
 }
 
@@ -442,10 +464,9 @@ async function askQuestion() {
   showChatResponse(false);
 
   try {
-    // prefer report_id; fallback to sending lipids
     const body = currentReportId
-      ? { question, report_id: currentReportId }
-      : { question, lipids: currentLipids };
+      ? { question, report_id: currentReportId, user_id: "default" }
+      : { question, lipids: currentLipids, user_id: "default" };
 
     const res = await fetch(CHAT_URL, {
       method: "POST",
@@ -459,17 +480,14 @@ async function askQuestion() {
         const j = await res.json();
         detail = j?.detail ? (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail)) : "";
       } catch (_) {}
-
       setChatError(detail || `chat failed. status: ${res.status}`);
       return;
     }
 
     const data = await res.json();
 
-    // if chat returns report_id, store it for follow-ups
     if (data?.report_id) {
       currentReportId = data.report_id;
-
       if (reportIdBadgeEl) {
         reportIdBadgeEl.textContent = `report_id: ${currentReportId}`;
         reportIdBadgeEl.classList.remove("hidden");
@@ -478,7 +496,7 @@ async function askQuestion() {
 
     renderChatResponse(data);
 
-    // client history
+    // add to local history (newest will show on top)
     chatHistory.push({
       q: question,
       a: data?.answer || "",
@@ -486,7 +504,6 @@ async function askQuestion() {
     });
     renderHistory();
 
-    // clear input after sending
     if (questionInputEl) questionInputEl.value = "";
     updateAskButtonState();
     questionInputEl?.focus();
@@ -498,15 +515,14 @@ async function askQuestion() {
 }
 
 if (askBtnEl) {
-  // start disabled until upload + input text
   updateAskButtonState();
-
-  askBtnEl.addEventListener("click", () => {
-    askQuestion();
-  });
+  askBtnEl.addEventListener("click", () => askQuestion());
 }
 
 // Initial state
 showResultsSection(false);
 showChatSection(false);
 updateAskButtonState();
+
+// load persisted history after refresh
+loadHistoryFromBackend();
