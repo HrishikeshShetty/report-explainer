@@ -11,7 +11,10 @@ import os
 
 import pdfplumber
 from dotenv import load_dotenv
-from openai import OpenAI
+
+# ✅ Gemini SDK
+import google.generativeai as genai
+
 
 app = FastAPI(title="report explainer - report overview api", version="0.2.0")
 
@@ -41,17 +44,21 @@ lipid_df: pd.DataFrame | None = None
 lipid_load_error: str | None = None
 
 # -----------------------------
-# Env / OpenAI
+# Env / Gemini
 # -----------------------------
 # Loads backend/report-overview/.env when uvicorn is started from backend/report-overview
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini").strip()
+# Prefer GEMINI_API_KEY, fallback to GOOGLE_API_KEY (some setups use this name)
+GEMINI_API_KEY = (os.getenv("GEMINI_API_KEY", "") or os.getenv("GOOGLE_API_KEY", "AIzaSyDexCK0q5v6Ccj2plLsDBctxnOo77xWJjQ")).strip()
 
-openai_client: OpenAI | None = None
-if OPENAI_API_KEY:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+# Default model (you can change via .env)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash").strip()
+
+gemini_enabled = False
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    gemini_enabled = True
 
 # -----------------------------
 # Lipid Detection (MVP)
@@ -172,21 +179,21 @@ def generate_ai_overview(
     grounding_rows: list[dict],
 ) -> dict:
     """
-    Calls OpenAI to produce a short, simple overview grounded in the CSV rows.
+    Calls Gemini to produce a short, simple overview grounded in the CSV rows.
     Returns a dict so we can add extra metadata later.
     """
-    if openai_client is None:
+    if not gemini_enabled:
         return {
             "enabled": False,
-            "message": "OPENAI_API_KEY not set. AI overview disabled.",
+            "message": "GEMINI_API_KEY not set. AI overview disabled.",
             "overview": None,
-            "model": OPENAI_MODEL,
+            "model": GEMINI_MODEL,
         }
 
     # Keep prompt small & safe
     text_snippet = (extracted_text or "")[:2500]
 
-    system_msg = (
+    system_rules = (
         "You are Report Explainer. You help users understand lipid panel results in simple language.\n"
         "Rules:\n"
         "- Use ONLY the provided grounding reference data and the extracted report text.\n"
@@ -195,7 +202,7 @@ def generate_ai_overview(
         "- Keep it short and clear (5-8 bullet points max).\n"
     )
 
-    user_msg = {
+    user_payload = {
         "detected_lipids": detected_lipids,
         "reference_data": grounding_rows,
         "extracted_report_text_snippet": text_snippet,
@@ -205,49 +212,44 @@ def generate_ai_overview(
         ),
     }
 
-    # -----------------------------
-    # UPDATED: quota-safe handling
-    # -----------------------------
-    try:
-        resp = openai_client.responses.create(
-            model=OPENAI_MODEL,
-            input=[
-                {"role": "system", "content": system_msg},
-                {"role": "user", "content": str(user_msg)},
-            ],
-        )
+    prompt = (
+        f"{system_rules}\n"
+        "INPUT (JSON-like):\n"
+        f"{user_payload}\n"
+        "\nOUTPUT:\n"
+    )
 
-        overview_text = getattr(resp, "output_text", None) or "AI overview could not be generated."
+    try:
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        resp = model.generate_content(prompt)
+
+        overview_text = getattr(resp, "text", None) or "AI overview could not be generated."
 
         return {
             "enabled": True,
             "message": "AI overview generated",
             "overview": overview_text.strip(),
-            "model": OPENAI_MODEL,
+            "model": GEMINI_MODEL,
         }
 
     except Exception as e:
         err = str(e).lower()
 
-        if (
-            "insufficient_quota" in err
-            or "exceeded your current quota" in err
-            or "rate limit" in err
-            or "429" in err
-        ):
+        # basic quota/rate handling
+        if "quota" in err or "rate" in err or "429" in err:
             return {
                 "enabled": False,
-                "message": "AI disabled: OpenAI quota/billing not available for this key",
+                "message": "AI disabled: Gemini quota/rate limit hit",
                 "overview": None,
-                "model": OPENAI_MODEL,
-                "error": "insufficient_quota",
+                "model": GEMINI_MODEL,
+                "error": "quota_or_rate_limit",
             }
 
         return {
             "enabled": False,
             "message": "AI overview failed",
             "overview": None,
-            "model": OPENAI_MODEL,
+            "model": GEMINI_MODEL,
             "error": str(e),
         }
 
@@ -289,7 +291,7 @@ async def upload_report(file: UploadFile = File(...)):
     # Grounding from CSV
     grounding_rows = get_grounding_rows_for_detected_lipids(detected_lipids)
 
-    # AI overview (Phase 2)
+    # AI overview (Gemini)
     ai_overview = generate_ai_overview(
         extracted_text=extracted_text,
         detected_lipids=detected_lipids,
